@@ -1,0 +1,37 @@
+
+# CMake build directories
+/build/
+/cmake-build-*/
+/out/
+
+# vcpkg installed dependencies
+/vcpkg_installed/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+CMakeUserPresets.json
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.VC.db
+*.VC.VC.opendb
+
+# VS Code local workspace settings
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+# Debug and release binaries
+Debug/
+Release/

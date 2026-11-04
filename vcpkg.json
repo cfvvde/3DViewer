@@ -1,0 +1,12 @@
+{
+    "name": "simple-3d-viewer",
+    "version-string": "0.1.0",
+    "builtin-baseline": "a4f7741c53c97354fc43222fea17955c657dd549",
+    "dependencies": [
+        "glfw3",
+        "glad",
+        "glm",
+        "assimp",
+        "nativefiledialog-extended"
+    ]
+}
