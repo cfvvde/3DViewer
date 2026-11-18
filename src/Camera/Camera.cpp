@@ -19,8 +19,8 @@ void Camera::reset()
 {
     target = glm::vec3(0.0f, 0.0f, 0.0f);
 
-    yaw = 90.0f;
-    pitch = 0.0f;
+    yaw = 58.0f;
+    pitch = 22.0f;
 
     distance = 3.0f;
 
@@ -141,14 +141,16 @@ void Camera::zoom(float scrollOffset)
 
 void Camera::frame(
     const glm::vec3& center,
-    float radius
+    float radius,
+    float aspectRatio
 )
 {
     target = center;
 
     radius = std::max(radius, 0.001f);
 
-    float halfFov = glm::radians(fov) * 0.5f;
+    const float verticalHalfFov = glm::radians(fov) * 0.5f;
+    const float halfFov = std::atan(std::tan(verticalHalfFov) * std::min(aspectRatio, 1.0f));
 
     // Подбираем расстояние камеры,
     // чтобы объект целиком помещался в кадр

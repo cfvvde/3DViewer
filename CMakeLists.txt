@@ -12,6 +12,7 @@ find_package(glad CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(nfd CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 add_executable(3DViewer
 
@@ -24,6 +25,7 @@ add_executable(3DViewer
     src/Model/ModelLoader.cpp
     src/Renderer/Renderer.cpp
     src/Renderer/Shader.cpp
+    src/UI/ViewerUI.cpp
 )
 
 target_include_directories(3DViewer PRIVATE
@@ -36,6 +38,15 @@ target_link_libraries(3DViewer PRIVATE
     glm::glm
     assimp::assimp
     nfd::nfd
+    imgui::imgui
+)
+
+add_custom_command(TARGET 3DViewer POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:3DViewer>/assets/models"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/test.obj"
+        "$<TARGET_FILE_DIR:3DViewer>/assets/models/test.obj"
+    VERBATIM
 )
 
 if(MSVC)

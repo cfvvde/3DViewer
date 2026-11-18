@@ -7,29 +7,31 @@
 
 Mesh::Mesh(
     const std::vector<Vertex>& vertices,
-    const std::vector<unsigned int>& indices
+    const std::vector<unsigned int>& indices,
+    const std::vector<unsigned int>& edgeIndices
 )
 {
-    if (vertices.empty() || indices.empty())
+    if (vertices.empty() || indices.empty() || edgeIndices.empty())
     {
         throw std::invalid_argument(
             "Mesh cannot be created from empty geometry"
         );
     }
 
-    if (indices.size() >
-        static_cast<std::size_t>(
-            std::numeric_limits<GLsizei>::max()))
+    const auto maxCount = static_cast<std::size_t>(std::numeric_limits<GLsizei>::max());
+    if (indices.size() > maxCount || edgeIndices.size() > maxCount)
     {
         throw std::length_error("Too many mesh indices");
     }
 
     indexCount = static_cast<GLsizei>(indices.size());
+    edgeIndexCount = static_cast<GLsizei>(edgeIndices.size());
 
     // Создаём OpenGL-объекты
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
+    glGenBuffers(1, &edgeEBO);
 
     glBindVertexArray(VAO);
 
@@ -57,6 +59,14 @@ Mesh::Mesh(
         GL_STATIC_DRAW
     );
 
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, edgeEBO);
+    glBufferData(
+        GL_ELEMENT_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(edgeIndices.size() * sizeof(unsigned int)),
+        edgeIndices.data(),
+        GL_STATIC_DRAW
+    );
+
     // Координаты вершин
     glVertexAttribPointer(
         0,
@@ -71,7 +81,7 @@ Mesh::Mesh(
 
     glEnableVertexAttribArray(0);
 
-    // Цвет вершин
+    // Нормали вершин
     glVertexAttribPointer(
         1,
         3,
@@ -79,7 +89,7 @@ Mesh::Mesh(
         GL_FALSE,
         sizeof(Vertex),
         reinterpret_cast<void*>(
-            offsetof(Vertex, color)
+            offsetof(Vertex, normal)
         )
     );
 
@@ -98,18 +108,24 @@ Mesh::~Mesh()
 
     if (EBO)
         glDeleteBuffers(1, &EBO);
+    if (edgeEBO)
+        glDeleteBuffers(1, &edgeEBO);
 }
 
 void Mesh::draw() const
 {
+    drawElements(GL_TRIANGLES, EBO, indexCount);
+}
+
+void Mesh::drawWireframe() const
+{
+    drawElements(GL_LINES, edgeEBO, edgeIndexCount);
+}
+
+void Mesh::drawElements(GLenum mode, GLuint buffer, GLsizei count) const
+{
     glBindVertexArray(VAO);
-
-    glDrawElements(
-        GL_TRIANGLES,
-        indexCount,
-        GL_UNSIGNED_INT,
-        nullptr
-    );
-
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer);
+    glDrawElements(mode, count, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
 }

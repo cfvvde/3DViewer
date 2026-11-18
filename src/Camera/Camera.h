@@ -12,7 +12,7 @@ public:
     glm::mat4 getViewMatrix() const;
 
     glm::mat4 getProjectionMatrix(float aspectRatio) const;
-    void frame(const glm::vec3& center, float radius);
+    void frame(const glm::vec3& center, float radius, float aspectRatio);
     // Управление камерой
     void orbit(float deltaX, float deltaY);
 

@@ -1,433 +1,245 @@
-
-#include <iostream>
-#include <vector>
+#include <algorithm>
+#include <cmath>
 #include <exception>
-#include <memory>
-
-#include "Model/Model.h"
-#include "Model/ModelLoader.h"
-#include <glad/glad.h>
-#include <nfd.h>
-
+#include <filesystem>
+#include <iostream>
 #include <memory>
 #include <string>
 
+#include <glad/glad.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include <nfd.h>
+#include <nfd_glfw3.h>
 
 #include "Camera/Camera.h"
-#include "Model/Mesh.h"
+#include "Model/ModelLoader.h"
 #include "Renderer/Renderer.h"
+#include "UI/ViewerUI.h"
 
-// Состояние управления камерой
-struct CameraInputState
+namespace
 {
-    Camera* camera = nullptr;
-
-    bool middleMousePressed = false;
-
-    double lastX = 0.0;
-    double lastY = 0.0;
-};
-
-// Обработка нажатий кнопок мыши
-void mouseButtonCallback(
-    GLFWwindow* window,
-    int button,
-    int action,
-    int
-)
-{
-    if (button != GLFW_MOUSE_BUTTON_MIDDLE)
-        return;
-
-    auto* input = static_cast<CameraInputState*>(
-        glfwGetWindowUserPointer(window)
-    );
-
-    if (!input)
-        return;
-
-    if (action == GLFW_PRESS)
+    void loadModel(
+        const std::string& path,
+        std::unique_ptr<Model>& model,
+        std::string& modelName,
+        std::string& error
+    )
     {
-        input->middleMousePressed = true;
-
-        glfwGetCursorPos(
-            window,
-            &input->lastX,
-            &input->lastY
-        );
+        try
+        {
+            auto nextModel = ModelLoader::loadOBJ(path);
+            modelName = std::filesystem::u8path(path).filename().u8string();
+            model = std::move(nextModel);
+            error.clear();
+        }
+        catch (const std::exception& exception)
+        {
+            error = exception.what();
+            std::cerr << error << '\n';
+        }
     }
-    else if (action == GLFW_RELEASE)
+
+    bool openModelDialog(
+        GLFWwindow* window,
+        std::unique_ptr<Model>& model,
+        std::string& modelName,
+        std::string& error
+    )
     {
-        input->middleMousePressed = false;
+        const nfdu8filteritem_t filters[] = {{"Wavefront OBJ", "obj"}};
+        nfdopendialogu8args_t args{};
+        args.filterList = filters;
+        args.filterCount = 1;
+        args.title = "Open 3D Model";
+        args.acceptLabel = "Open";
+        NFD_GetNativeWindowFromGLFWWindow(window, &args.parentWindow);
+
+        nfdu8char_t* selectedPath = nullptr;
+        const nfdresult_t result = NFD_OpenDialogU8_With(&selectedPath, &args);
+        if (result == NFD_CANCEL)
+            return false;
+        if (result == NFD_ERROR)
+        {
+            error = NFD_GetError();
+            std::cerr << error << '\n';
+            return false;
+        }
+
+        const std::unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> path(selectedPath, NFD_FreePathU8);
+        loadModel(path.get(), model, modelName, error);
+        return error.empty();
+    }
+
+    void updateCamera(GLFWwindow* window, Camera& camera, const ViewerUI& ui, bool& dragging)
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        if (!glfwGetWindowAttrib(window, GLFW_FOCUSED) || !ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+            dragging = false;
+
+        const ImVec2 min = ui.viewportMin();
+        const ImVec2 max = ui.viewportMax();
+        const bool overViewport = !io.WantCaptureMouse &&
+            ImGui::IsMouseHoveringRect(min, max, false);
+
+        if (overViewport)
+        {
+            if (io.MouseWheel != 0.0f)
+                camera.zoom(io.MouseWheel);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+            {
+                dragging = true;
+                return;
+            }
+        }
+
+        if (!dragging)
+            return;
+
+        if (io.KeyShift)
+            camera.pan(io.MouseDelta.x, io.MouseDelta.y, max.y - min.y);
+        else
+            camera.orbit(io.MouseDelta.x, io.MouseDelta.y);
+    }
+
+    void runViewer(GLFWwindow* window, const char* programPath)
+    {
+        Camera camera;
+        Renderer renderer;
+        ViewerUI ui(window);
+        RenderSettings settings;
+        std::unique_ptr<Model> model;
+        std::string modelName;
+        std::string error;
+        const std::filesystem::path samplePath("assets/models/test.obj");
+        std::error_code fileError;
+        const auto startPath = std::filesystem::exists(samplePath, fileError)
+            ? samplePath
+            : std::filesystem::u8path(programPath).parent_path() / samplePath;
+        loadModel(startPath.u8string(), model, modelName, error);
+
+        bool frameRequested = static_cast<bool>(model);
+        bool dragging = false;
+        glEnable(GL_DEPTH_TEST);
+
+        while (!glfwWindowShouldClose(window))
+        {
+            glfwPollEvents();
+
+            int framebufferWidth, framebufferHeight;
+            glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+            if (framebufferWidth == 0 || framebufferHeight == 0)
+            {
+                dragging = false;
+                glfwWaitEventsTimeout(0.1);
+                continue;
+            }
+
+            ui.beginFrame();
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool keyboardAvailable = !io.WantCaptureKeyboard;
+            if (keyboardAvailable && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
+            {
+                settings.shading = settings.shading == ShadingMode::Solid
+                    ? ShadingMode::Wireframe
+                    : ShadingMode::Solid;
+            }
+
+            const ViewerActions actions = ui.draw(settings, modelName, error);
+            if (actions.openModel || (keyboardAvailable && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false)))
+            {
+                dragging = false;
+                frameRequested |= openModelDialog(window, model, modelName, error);
+            }
+            else
+            {
+                updateCamera(window, camera, ui, dragging);
+            }
+            frameRequested |= actions.frameModel ||
+                (keyboardAvailable && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false));
+
+            const ImVec2 min = ui.viewportMin();
+            const ImVec2 max = ui.viewportMax();
+            const int left = static_cast<int>(std::lround(min.x * io.DisplayFramebufferScale.x));
+            const int top = static_cast<int>(std::lround(min.y * io.DisplayFramebufferScale.y));
+            const int right = static_cast<int>(std::lround(max.x * io.DisplayFramebufferScale.x));
+            const int bottom = static_cast<int>(std::lround(max.y * io.DisplayFramebufferScale.y));
+
+            glClearColor(settings.backgroundColor.r, settings.backgroundColor.g, settings.backgroundColor.b, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            const int width = right - left;
+            const int height = bottom - top;
+            if (model && width > 0 && height > 0)
+            {
+                const float aspect = static_cast<float>(width) / static_cast<float>(height);
+                if (frameRequested)
+                {
+                    camera.frame(glm::vec3(0.0f), model->getBoundingRadius(), aspect);
+                    frameRequested = false;
+                }
+
+                glViewport(left, framebufferHeight - bottom, width, height);
+                renderer.draw(*model, glm::mat4(1.0f), camera.getViewMatrix(),
+                    camera.getProjectionMatrix(aspect), settings);
+            }
+
+            ui.drawViewportOverlay(camera.getViewMatrix());
+            glViewport(0, 0, framebufferWidth, framebufferHeight);
+            ui.render();
+            glfwSwapBuffers(window);
+        }
     }
 }
 
-// Обработка движения мыши
-void cursorPositionCallback(
-    GLFWwindow* window,
-    double xpos,
-    double ypos
-)
-{
-    auto* input = static_cast<CameraInputState*>(
-        glfwGetWindowUserPointer(window)
-    );
-
-    if (!input || !input->camera)
-        return;
-
-    if (!input->middleMousePressed)
-        return;
-
-    // Разница между текущей и предыдущей позицией мыши
-    float deltaX = static_cast<float>(
-        xpos - input->lastX
-    );
-
-    float deltaY = static_cast<float>(
-        ypos - input->lastY
-    );
-
-    input->lastX = xpos;
-    input->lastY = ypos;
-
-    // Проверяем, удерживается ли Shift
-    bool shiftPressed =
-        glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
-        glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
-
-    if (shiftPressed)
-    {
-        // Shift + MMB = Pan
-
-        int width, height;
-
-        glfwGetFramebufferSize(
-            window,
-            &width,
-            &height
-        );
-
-        input->camera->pan(
-            deltaX,
-            deltaY,
-            static_cast<float>(height)
-        );
-    }
-    else
-    {
-        // MMB = Orbit
-
-        input->camera->orbit(
-            deltaX,
-            deltaY
-        );
-    }
-}
-
-// Обработка колеса мыши
-void scrollCallback(
-    GLFWwindow* window,
-    double xoffset,
-    double yoffset
-)
-{
-    auto* input = static_cast<CameraInputState*>(
-        glfwGetWindowUserPointer(window)
-    );
-
-    if (!input || !input->camera)
-        return;
-
-    // Scroll = Zoom
-    input->camera->zoom(
-        static_cast<float>(yoffset)
-    );
-}
-
-void openModelDialog(
-    Camera& camera,
-    std::unique_ptr<Model>& currentModel
-)
-{
-    // Фильтр для OBJ-файлов
-    nfdu8filteritem_t filters[] =
-    {
-        { "Wavefront OBJ", "obj" }
-    };
-
-    // Настройки диалогового окна
-    nfdopendialogu8args_t args{};
-
-    args.filterList = filters;
-    args.filterCount = 1;
-    args.title = "Open 3D Model";
-    args.acceptLabel = "Open";
-
-    nfdu8char_t* outPath = nullptr;
-
-    // Открываем системный диалог
-    nfdresult_t result = NFD_OpenDialogU8_With(
-        &outPath,
-        &args
-    );
-
-    // Пользователь закрыл окно
-    if (result == NFD_CANCEL)
-    {
-        std::cout << "Model selection cancelled\n";
-        return;
-    }
-
-    // Ошибка диалога
-    if (result == NFD_ERROR)
-    {
-        std::cerr << "File dialog error: "
-                  << NFD_GetError() << std::endl;
-        return;
-    }
-
-    // Сохраняем путь в std::string
-    std::string filepath(
-        reinterpret_cast<const char*>(outPath)
-    );
-
-    // Освобождаем память, выделенную NFD
-    NFD_FreePathU8(outPath);
-
-    try
-    {
-        std::cout << "Loading model: "
-                  << filepath << std::endl;
-
-        // Сначала загружаем новую модель
-        // во временный объект
-        std::unique_ptr<Model> newModel =
-            ModelLoader::loadOBJ(filepath);
-
-        // Настраиваем камеру под размеры модели
-        camera.frame(
-            glm::vec3(0.0f),
-            newModel->getBoundingRadius()
-        );
-
-        // Только после успешной загрузки
-        // заменяем предыдущую модель
-        currentModel = std::move(newModel);
-
-        std::cout << "Model loaded successfully!\n";
-    }
-    catch (const std::exception& e)
-    {
-        std::cerr << "Model loading error:\n"
-                  << e.what() << std::endl;
-
-        // Предыдущая модель остаётся на экране
-    }
-}
-
-
-int main()
+int main(int argc, char* argv[])
 {
     if (!glfwInit())
     {
         std::cerr << "GLFW initialization failed\n";
-        return -1;
+        return 1;
     }
-    // Инициализация Native File Dialog
-    
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-    GLFWwindow* window = glfwCreateWindow(
-        1280,
-        720,
-        "Simple 3D Viewer",
-        nullptr,
-        nullptr
-    );
-
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "3D Viewer", nullptr, nullptr);
     if (!window)
     {
         std::cerr << "Window creation failed\n";
         glfwTerminate();
-        return -1;
+        return 1;
     }
 
+    glfwSetWindowSizeLimits(window, 700, 460, GLFW_DONT_CARE, GLFW_DONT_CARE);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    if (!gladLoadGLLoader(
-        reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
+    int exitCode = 1;
+    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
     {
         std::cerr << "GLAD initialization failed\n";
-
-        glfwDestroyWindow(window);
-        glfwTerminate();
-
-        return -1;
     }
-    if (NFD_Init() != NFD_OKAY)
+    else if (NFD_Init() != NFD_OKAY)
     {
-        std::cerr << "NFD initialization failed: "
-                << NFD_GetError() << std::endl;
-
-        glfwDestroyWindow(window);
-        glfwTerminate();
-
-        return -1;
+        std::cerr << "NFD initialization failed: " << NFD_GetError() << '\n';
     }
-    glEnable(GL_DEPTH_TEST);
-
-    int exitCode = 0;
-
-    try
+    else
     {
+        try
         {
-            // Создаём камеру и рендерер
-            Camera camera;
-
-            Renderer renderer;
-
-            // Загружаем OBJ-модель
-            std::unique_ptr<Model> model =
-                ModelLoader::loadOBJ(
-                    "assets/models/test.obj"
-                );
-            // Состояние сочетания Ctrl + O
-            bool ctrlOWasPressed = false;
-            // Автоматически настраиваем камеру
-            camera.frame(
-                glm::vec3(0.0f),
-                model->getBoundingRadius()
-            );
-
-            // Настраиваем обработку мыши
-            CameraInputState cameraInput;
-
-            cameraInput.camera = &camera;
-
-            glfwSetWindowUserPointer(
-                window,
-                &cameraInput
-            );
-
-            glfwSetMouseButtonCallback(
-                window,
-                mouseButtonCallback
-            );
-
-            glfwSetCursorPosCallback(
-                window,
-                cursorPositionCallback
-            );
-
-            glfwSetScrollCallback(
-                window,
-                scrollCallback
-            );
-
-            std::cout << "Model loaded successfully!\n";
-
-            // Главный цикл
-            while (!glfwWindowShouldClose(window))
-            {
-                glfwPollEvents();
-
-                // Проверяем Ctrl
-                bool ctrlPressed =
-                    glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-                    glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-
-                // Проверяем O
-                bool oPressed =
-                    glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS;
-
-                // Проверяем сочетание Ctrl + O
-                bool ctrlOPressed = ctrlPressed && oPressed;
-
-                // Обрабатываем только новое нажатие,
-                // чтобы диалог не открывался несколько раз
-                if (ctrlOPressed && !ctrlOWasPressed)
-                {
-                    // Сбрасываем состояние вращения мыши
-                    cameraInput.middleMousePressed = false;
-
-                    // Открываем диалог выбора OBJ
-                    openModelDialog(camera, model);
-                }
-
-                ctrlOWasPressed = ctrlOPressed;
-
-                int width, height;
-
-                glfwGetFramebufferSize(
-                    window,
-                    &width,
-                    &height
-                );
-
-                glViewport(0, 0, width, height);
-
-                glClearColor(
-                    0.08f,
-                    0.10f,
-                    0.16f,
-                    1.0f
-                );
-
-                glClear(
-                    GL_COLOR_BUFFER_BIT |
-                    GL_DEPTH_BUFFER_BIT
-                );
-
-                if (width > 0 && height > 0)
-                {
-                    // Модель пока неподвижна
-                    glm::mat4 modelMatrix(1.0f);
-
-                    // Получаем матрицы камеры
-                    glm::mat4 view =
-                        camera.getViewMatrix();
-
-                    float aspectRatio =
-                        static_cast<float>(width) /
-                        static_cast<float>(height);
-
-                    glm::mat4 projection =
-                        camera.getProjectionMatrix(aspectRatio);
-
-                    // Отрисовываем загруженную модель
-                    renderer.draw(
-                        *model,
-                        modelMatrix,
-                        view,
-                        projection
-                    );
-                }
-
-                glfwSwapBuffers(window);
-            }
+            runViewer(window, argc > 0 ? argv[0] : "");
+            exitCode = 0;
         }
+        catch (const std::exception& exception)
+        {
+            std::cerr << "Application error: " << exception.what() << '\n';
+        }
+        NFD_Quit();
     }
-    catch (const std::exception& e)
-    {
-        std::cerr << "Application error:\n"
-                  << e.what() << std::endl;
-
-        exitCode = 1;
-    }
-
-    NFD_Quit();
 
     glfwDestroyWindow(window);
     glfwTerminate();
-
     return exitCode;
 }

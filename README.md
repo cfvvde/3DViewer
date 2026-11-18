@@ -14,7 +14,9 @@ The application allows users to load Wavefront OBJ models and inspect them using
 - Automatic model centering
 - Automatic camera framing
 - Native file selection dialog
-- OpenGL-based rendering
+- Solid shading with Blinn–Phong lighting and imported or generated normals
+- Wireframe view of the original OBJ polygon edges
+- Blender-inspired Dear ImGui toolbar and viewport settings
 
 ## Technologies
 
@@ -25,6 +27,7 @@ The application allows users to load Wavefront OBJ models and inspect them using
 - GLM
 - Assimp
 - Native File Dialog Extended
+- Dear ImGui
 - CMake
 - vcpkg
 
@@ -38,6 +41,7 @@ The application allows users to load Wavefront OBJ models and inspect them using
 │   ├── Camera/
 │   ├── Model/
 │   ├── Renderer/
+│   ├── UI/
 │   └── main.cpp
 ├── CMakeLists.txt
 ├── CMakePresets.json
@@ -94,7 +98,12 @@ Run:
 | Orbit | Middle Mouse Button |
 | Pan | Shift + Middle Mouse Button |
 | Zoom | Mouse Wheel |
-| Open Model | Ctrl + O |
+| Open Model | Open OBJ… or Ctrl + O |
+| Frame Model | Frame Model or F |
+| Switch Solid / Wireframe | Toolbar or Z |
+
+Use the right-hand panel to change the background, surface or wire color.
+Solid mode also exposes ambient, diffuse and specular intensity and shininess.
 
 ## Supported Formats
 

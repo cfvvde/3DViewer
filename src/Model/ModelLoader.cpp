@@ -24,7 +24,7 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
     // 2. Загружаем модель
     const aiScene* scene = importer.ReadFile(
         filepath,
-        aiProcess_Triangulate |
+        aiProcess_GenNormals |
         aiProcess_JoinIdenticalVertices |
         aiProcess_PreTransformVertices |
         aiProcess_ValidateDataStructure
@@ -41,6 +41,8 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
 
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
+    std::vector<unsigned int> edgeIndices;
+    std::vector<unsigned int> baseVertices(scene->mNumMeshes);
 
     // Начальные границы модели
     glm::vec3 minBounds(
@@ -68,6 +70,7 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
                 "Model contains too many vertices"
             );
         }
+        baseVertices[i] = static_cast<unsigned int>(baseVertex);
 
         // Извлекаем вершины
         for (unsigned int j = 0; j < mesh->mNumVertices; ++j)
@@ -80,10 +83,13 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
             vertex.position[1] = position.y;
             vertex.position[2] = position.z;
 
-            // Временный единый цвет модели
-            vertex.color[0] = 0.75f;
-            vertex.color[1] = 0.80f;
-            vertex.color[2] = 0.92f;
+            if (mesh->HasNormals())
+            {
+                const aiVector3D& normal = mesh->mNormals[j];
+                vertex.normal[0] = normal.x;
+                vertex.normal[1] = normal.y;
+                vertex.normal[2] = normal.z;
+            }
 
             vertices.push_back(vertex);
 
@@ -97,13 +103,38 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
             maxBounds = glm::max(maxBounds, p);
         }
 
-        // Извлекаем индексы треугольников
+        // Keep the original polygon boundaries for wireframe.
         for (unsigned int j = 0; j < mesh->mNumFaces; ++j)
         {
             const aiFace& face = mesh->mFaces[j];
+            if (face.mNumIndices < 3)
+                continue;
 
-            // После aiProcess_Triangulate
-            // каждая полигональная грань должна быть треугольником
+            unsigned int previous = face.mIndices[face.mNumIndices - 1];
+            for (unsigned int k = 0; k < face.mNumIndices; ++k)
+            {
+                const unsigned int current = face.mIndices[k];
+                edgeIndices.push_back(baseVertices[i] + previous);
+                edgeIndices.push_back(baseVertices[i] + current);
+                previous = current;
+            }
+        }
+    }
+
+    // Assimp triangulation changes the face list while preserving vertex indices.
+    scene = importer.ApplyPostProcessing(aiProcess_Triangulate);
+    if (!scene)
+        throw std::runtime_error(importer.GetErrorString());
+
+    for (unsigned int i = 0; i < scene->mNumMeshes; ++i)
+    {
+        const aiMesh* mesh = scene->mMeshes[i];
+        if (!mesh || !mesh->HasPositions())
+            continue;
+
+        for (unsigned int j = 0; j < mesh->mNumFaces; ++j)
+        {
+            const aiFace& face = mesh->mFaces[j];
             if (face.mNumIndices != 3)
                 continue;
 
@@ -116,11 +147,7 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
                     );
                 }
 
-                indices.push_back(
-                    static_cast<unsigned int>(
-                        baseVertex + face.mIndices[k]
-                    )
-                );
+                indices.push_back(baseVertices[i] + face.mIndices[k]);
             }
         }
     }
@@ -175,6 +202,7 @@ std::unique_ptr<Model> ModelLoader::loadOBJ(
     return std::make_unique<Model>(
         vertices,
         indices,
+        edgeIndices,
         radius
     );
 }

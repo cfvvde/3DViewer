@@ -158,3 +158,23 @@ void Shader::setMat4(
         glm::value_ptr(matrix)
     );
 }
+
+void Shader::setMat3(const char* name, const glm::mat3& matrix) const
+{
+    glUniformMatrix3fv(glGetUniformLocation(program, name), 1, GL_FALSE, glm::value_ptr(matrix));
+}
+
+void Shader::setVec3(const char* name, const glm::vec3& value) const
+{
+    glUniform3fv(glGetUniformLocation(program, name), 1, glm::value_ptr(value));
+}
+
+void Shader::setFloat(const char* name, float value) const
+{
+    glUniform1f(glGetUniformLocation(program, name), value);
+}
+
+void Shader::setBool(const char* name, bool value) const
+{
+    glUniform1i(glGetUniformLocation(program, name), value ? GL_TRUE : GL_FALSE);
+}
